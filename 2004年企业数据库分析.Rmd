@@ -1,0 +1,2271 @@
+---
+title: "R: 2004年企业数据库分析"
+author: "Dai Yichao cc"
+date: "9/11/2020"
+output: html_document
+---
+
+---
+
+### Package needed: 
+
+```{r}
+options(warn = -1)
+suppressMessages(library(ggplot2))
+suppressMessages(library(Hmisc))
+suppressMessages(library(dplyr))
+suppressMessages(library(readxl))
+suppressMessages(library(gridExtra))
+suppressMessages(library(plotly))
+library(statsr)
+library(scales)
+library(openxlsx)
+library(ggstatsplot)
+options(warn = 0)
+```
+
+---
+
+### Data Build in
+
+1. Read into the data from the **ACCESS** Database. ('2004年企业数据库.mdb')
+
+2. Read into the data from excel, to match the index of the industry ('行业类别.xlsx'):
+
+
+3. Change the data type of some variables. 
+
+```{r cache=TRUE}
+setwd("/Users/daiyichao/Desktop")
+
+## dat = mdb.get('2004年企业数据库.mdb")
+
+dat = read.csv('2004年企业数据库.csv',na.strings = c("",'NA'))
+
+行业类别名称 = read_excel("行业类别.xlsx")
+colnames(行业类别名称) = c('行业大类','行业名称')
+行业类别名称$行业大类 = as.character(行业类别名称$行业大类)
+names(dat) ## Variables names 
+```
+
+---
+
+### Missing value / Checking Data Accuracy
+
+1. Checking the missing vaclue
+
+```{r cache=TRUE}
+## Check for the missig values 
+missing_value = colSums(is.na(dat)) 
+missing_value = data.frame(missing_value)
+rn = rownames(missing_value)
+missing_value = cbind(rn, missing_value)
+missing_situation = missing_value[order(missing_value$missing_value,decreasing = TRUE),]
+options(digits = 3)  ## Set the overview decimal places
+missing_situation = missing_situation %>% 
+        mutate(percentage = missing_value / nrow(dat))
+knitr::kable(head(missing_situation,n = 19))
+
+```
+
+In this report, we mainly consider the education level, employment, revenue, salary, and district, for now, the effect of these missing value can be ignored. 
+
+2. 
+
+从业人数男 = 高等教育男+中等教育男+初等教育男
+
+从业人数女 = 高等教育女+中等教育女+初等教育女
+
+总从业人数 = 从业人数男+从业人数女
+
+```{r,cache=TRUE}
+### 从业人员男检查
+dat1 = dat
+tf1 = logical(0)
+a = which(colnames(dat1) == '从业人员男')
+for(i in 1:nrow(dat)){
+        tf1[i] = (dat[i,a] == sum(dat[i,(a+1):(a+5)]))
+}
+table(tf1)                                                       ## data incorrect '从业人员男' 5 FALSE
+
+### 从业人员女检查
+tf2 = logical(0)
+b = which(colnames(dat1) == '从业人员女')
+for(i in 1:nrow(dat)){
+        tf2[i] = (dat[i,b] == sum(dat[i,(b+1):(b+5)]))
+}
+table(tf2)                                                       ## data incorrect '从业人员女' 9 FALSE
+
+### 总从业人员检查
+table(dat$全部从业人 == (dat$从业人员女+dat$从业人员男))        ##  as a result  data incorrect '总从业人员'
+
+
+table(dat$省份)                                                 ## data incorrect '省份'
+
+## 工资检查 / 福利检查
+
+table(dat$应付工资 >= dat$主营付工资)
+table(dat1$应付福利 >= dat$主营付福利)
+```
+
+
+### Data Repairing. 
+
+```{r,cache=TRUE}
+## repair the data about '省份' 
+
+dat1$行业类别 = as.character(dat1$行业类别)
+class(dat1$行业类别)
+dat1$地址代码 = as.character(dat1$地址代码)
+class(dat1$地址代码)
+dat1$省份 = as.character(dat1$省份)
+class(dat1$省份)
+dat1$市 = as.character(dat1$市)
+class(dat1$市)
+
+
+new = character(0)
+for(i in 1:nrow(dat1)){
+        if(nchar(dat1$省份[i]) > 2){
+                new[i] = substr(dat1$省份[i],1,2)
+        }
+        else{
+                new[i] = dat1$省份[i]
+        }
+}
+
+table(new)
+
+table(dat$省份)
+
+dat1$省份 = new
+dat1[which(dat1$省份 == '黑龙'), '省份'] = '黑龙江'
+dat1[which(dat1$省份 == '内蒙'), '省份'] = '内蒙古'
+dat1[which(dat1$省份 == '浮山'), '省份'] = '山西'
+dat1[which(dat1$省份 == '广州'), '省份'] = '广东'
+
+省份统计 = data.frame(table(dat1$省份))
+省份统计
+
+
+## 从业人口
+a = which(colnames(dat1) == '从业人员男')
+b = which(colnames(dat1) == '从业人员女')
+
+
+dat1$从业人员男 = rowSums(dat1[,(a+1):(a+5)])
+dat1$从业人员女 = rowSums(dat1[,(b+1):(b+5)])
+
+tf1 = logical(0)                                        ## Check backward '从业人员男'
+a = which(colnames(dat1) == '从业人员男')
+for(i in 1:nrow(dat1)){
+        tf1[i] = (dat1[i,a] == sum(dat1[i,(a+1):(a+5)]))
+}
+table(tf1) 
+
+
+tf2 = logical(0)                                        ## Check backward '从业人员女'
+b = which(colnames(dat1) == '从业人员女')
+for(i in 1:nrow(dat1)){
+        tf2[i] = (dat1[i,b] == sum(dat1[i,(b+1):(b+5)]))
+}
+table(tf2)   
+
+dat1$全部从业人 = dat1$从业人员男+dat1$从业人员女## 全部从业人
+
+table(dat1$全部从业人 == 0)   ## ???
+```
+
+Show the specific Data. 
+
+```{r}
+table(dat1$全部从业人 == 0)
+## dat1[which(dat1$全部从业人 == 0),(1:6)]
+```
+
+
+Delete the the rows which 全部从业人 == 0, these data are werid, and need further check and research. 
+
+
+```{r}
+dat1 = dat1[-(which(dat1$全部从业人 == 0)),]
+```
+
+---
+
+### Joining Table: 2004 企业数据库 Left  Join 行业分类:
+
+```{r,cache=TRUE}
+行业大类 = character(0)
+
+for(i in 1:nrow(dat1)){
+        if(nchar(dat1$行业类别[i]) == 3){
+                行业大类[i] = substr(dat1$行业类别[i],1,1)
+        }
+        else{
+                行业大类[i] = substr(dat1$行业类别[i],1,2)
+        }
+}
+
+
+db1 = data.frame(省份 = dat1$省份, 地区编码 = substr(dat1$地址代码,1,3) , 行业大类)
+db1 = cbind(db1, dat1[,a:(b+12)])
+db1 = left_join(db1,行业类别名称, by = '行业大类')
+db1$地区编码 = gsub('\\.', '', db1$地区编码)
+
+
+## Variable valuing
+
+db1$总从业人数 = db1$从业人员男+db1$从业人员女
+db1$应付工资  = dat1$应付工资
+db1$应付福利 = dat1$应付福利 
+db1$职工教育费  = dat1$职工教育费
+db1$劳动保险费 = dat1$劳动保险费
+db1$养老医疗保 = dat1$养老医疗保
+db1$ 住房公积补= dat1$住房公积补
+db1$营业收入合= dat1$营业收入合
+db1$利润总额= dat1$利润总额
+db1$薪酬 = db1$应付工资 + db1$应付福利 + db1$职工教育费 + db1$劳动保险费 + db1$养老医疗保 + db1$ 住房公积补
+```
+
+---
+
+### 企业规模分类
+
+1. 300 以下为小规模企业
+
+2. 300-2000 为中规模企业
+
+3. 2000 以上为大规模企业
+
+
+```{r}
+db1$规模 = cut2(db1$总从业人数,cuts = c(300,2000))
+levels(db1$规模) = c('Small Scale','Median Scale','Large Scale')
+histogram(db1$规模, main = 'Differennt Scale Percentage',xlab = 'Differet Scale')
+table(db1$规模)
+```
+
+---
+
+### db1 table： 
+
+#### 按行业及规模分就业分布
+
+高级教育： 研究生，本科，专科
+
+中等教育： 高中
+
+初等教育： 初中及初中以下
+
+
+```{r,cache=TRUE}
+## 按行业分就业分布
+options(digits = 4)
+db1$行业大类 = as.numeric(db1$行业大类)
+按行业分就业分布 = db1 %>% 
+        select(3,30,41,31,17,4,5:29,40,39,38) %>%
+        group_by(行业大类,行业名称,规模) %>%
+        summarise_all(sum)  %>%
+        arrange(-desc(行业大类))
+
+按行业分就业分布_比例  = as.data.frame(按行业分就业分布[,1:3])
+for(i in 4:30){
+        g = (按行业分就业分布[,i])/(按行业分就业分布[,4])
+        按行业分就业分布_比例  = cbind(按行业分就业分布_比例,g)
+}
+
+按行业分就业分布_比例 = as.data.frame(按行业分就业分布_比例)
+按行业分就业分布_比例 = 按行业分就业分布_比例 %>%
+        mutate(初等教育及以下 = 初中以下男 + 初中学历女) %>%
+        mutate(中等教育 = 高中学历男 + 高中学历女) %>%
+        mutate(高等教育 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(初等教育及以下男 = 初中以下男) %>%
+        mutate(初等教育及以下女 = 初中学历女)  %>%
+        mutate(中等教育男 =高中学历男 )%>%
+        mutate(中等教育女 = 高中学历女)%>%
+        mutate(高等教育男 = 研究生上男 + 本科学历男 + 大专学历男)%>%
+        mutate(高等教育女 = 研究生上女 + 本科学历女 + 大专学历女)%>%
+        mutate(平均薪酬 = 按行业分就业分布$薪酬 / 按行业分就业分布$总从业人数)%>%
+        mutate(平均员工营业收入 = 按行业分就业分布$营业收入合 / 按行业分就业分布$总从业人数) %>%
+        mutate(平均员工利润 = 按行业分就业分布$利润总额 / 按行业分就业分布$总从业人数) %>%
+        mutate(指标1 = (高等教育/平均薪酬)*100 )%>%
+        mutate(指标2 = (高等教育/平均员工营业收入)*100)
+
+table(按行业分就业分布_比例$高等教育+按行业分就业分布_比例$中等教育+按行业分就业分布_比例$初等教育及以下)
+
+按行业分就业分布 = 按行业分就业分布 %>% 
+        select(1,2,4:33) %>% 
+        group_by(行业大类,行业名称) %>%
+        summarize_all(sum)  %>% 
+        mutate(初等教育及以下 = 初中以下男 + 初中学历女) %>%
+        mutate(中等教育 = 高中学历男 + 高中学历女) %>%
+        mutate(高等教育 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(初等教育及以下男 = 初中以下男) %>%
+        mutate(初等教育及以下女 = 初中学历女)  %>%
+        mutate(中等教育男 =高中学历男 )%>%
+        mutate(中等教育女 = 高中学历女)%>%
+        mutate(高等教育男 = 研究生上男 + 本科学历男 + 大专学历男)%>%
+        mutate(高等教育女 = 研究生上女 + 本科学历女 + 大专学历女)%>%
+        mutate(平均薪酬 = 薪酬 / 总从业人数)%>%
+        mutate(平均员工营业收入 = 营业收入合 / 总从业人数) %>%
+        mutate(平均员工利润 = 利润总额 /总从业人数) %>%
+        mutate(指标1 = (高等教育/平均薪酬)*100 )%>%
+        mutate(指标2 = (高等教育/平均员工营业收入)*100)
+按行业分就业分布 = as.data.frame(按行业分就业分布)
+
+head(按行业分就业分布_比例)
+
+
+```
+
+#### 按地区及规模分就业分布
+
+高级教育： 研究生，本科，专科
+
+中等教育： 高中
+
+初等教育： 初中及初中以下
+
+```{r,cache=TRUE}
+## 按地区分就业分布
+db1$地区编码 = as.numeric(db1$地区编码)
+按地区分就业分布 = db1 %>% 
+        select(2,1,41,31,17,4,5:29,40,39,38) %>%
+        group_by(地区编码,省份, 规模) %>%
+        summarise_all(sum)  %>%
+        arrange(-desc(地区编码))
+
+按地区分就业分布_比例 = as.data.frame(按地区分就业分布[,1:3])
+for(i in 4:30){
+        g = (按地区分就业分布[,i])/(按地区分就业分布[,4])
+        按地区分就业分布_比例  = cbind(按地区分就业分布_比例,g)
+}
+
+
+按地区分就业分布_比例 = as.data.frame(按地区分就业分布_比例)
+
+按地区分就业分布_比例 = 按地区分就业分布_比例 %>%
+        mutate(初等教育及以下 = 初中以下男 + 初中学历女) %>%
+        mutate(中等教育 = 高中学历男 + 高中学历女) %>%
+        mutate(高等教育 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(初等教育及以下男 = 初中以下男) %>%
+        mutate(初等教育及以下女 = 初中学历女)  %>%
+        mutate(中等教育男 =高中学历男 )%>%
+        mutate(中等教育女 = 高中学历女)%>%
+        mutate(高等教育男 = 研究生上男 + 本科学历男 + 大专学历男)%>%
+        mutate(高等教育女 = 研究生上女 + 本科学历女 + 大专学历女)%>%
+        mutate(平均薪酬 = 按地区分就业分布$薪酬 / 按地区分就业分布$总从业人数)%>%
+        mutate(平均员工营业收入 = 按地区分就业分布$营业收入合 / 按地区分就业分布$总从业人数) %>%
+        mutate(平均员工利润 = 按地区分就业分布$利润总额 / 按地区分就业分布$总从业人数) %>%
+        mutate(指标1 = (高等教育/平均薪酬)*100 )%>%
+        mutate(指标2 = (高等教育/平均员工营业收入)*100)
+
+按地区分就业分布 = 按地区分就业分布 %>% 
+        select(1,2,4:33) %>% 
+        group_by(地区编码,省份) %>%
+        summarize_all(sum)  %>% 
+        mutate(初等教育及以下 = 初中以下男 + 初中学历女) %>%
+        mutate(中等教育 = 高中学历男 + 高中学历女) %>%
+        mutate(高等教育 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(初等教育及以下男 = 初中以下男) %>%
+        mutate(初等教育及以下女 = 初中学历女)  %>%
+        mutate(中等教育男 =高中学历男 )%>%
+        mutate(中等教育女 = 高中学历女)%>%
+        mutate(高等教育男 = 研究生上男 + 本科学历男 + 大专学历男)%>%
+        mutate(高等教育女 = 研究生上女 + 本科学历女 + 大专学历女)%>%
+        mutate(平均薪酬 = 薪酬 / 总从业人数)%>%
+        mutate(平均员工营业收入 = 营业收入合 / 总从业人数) %>%
+        mutate(平均员工利润 = 利润总额 /总从业人数) %>%
+        mutate(指标1 = (高等教育/平均薪酬)*100 )%>%
+        mutate(指标2 = (高等教育/平均员工营业收入)*100)
+
+head(按地区分就业分布_比例)
+
+```
+
+
+#### 按地区及行业及规模分： 
+
+
+```{r}
+db1$地区编码 = as.numeric(db1$地区编码)
+按地区及行业及规模分 = db1 %>% 
+        select(2,1,3,30,41,31,17,4,5:29,40,39,38) %>%
+        group_by(地区编码,省份,行业大类,行业名称,规模) %>%
+        summarise_all(sum)  %>%
+        arrange(-desc(地区编码))
+
+按地区及行业及规模_比例 = as.data.frame(按地区及行业及规模分[,1:5])
+for(i in 6:32){
+        g = (按地区及行业及规模分[,i])/(按地区及行业及规模分[,6])
+        按地区及行业及规模_比例   = cbind(按地区及行业及规模_比例,g)
+}
+
+
+按地区及行业及规模_比例  = as.data.frame(按地区及行业及规模_比例 )
+
+按地区及行业及规模_比例  = 按地区及行业及规模_比例  %>%
+        mutate(初等教育及以下 = 初中以下男 + 初中学历女) %>%
+        mutate(中等教育 = 高中学历男 + 高中学历女) %>%
+        mutate(高等教育 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(初等教育及以下男 = 初中以下男) %>%
+        mutate(初等教育及以下女 = 初中学历女)  %>%
+        mutate(中等教育男 =高中学历男 )%>%
+        mutate(中等教育女 = 高中学历女)%>%
+        mutate(高等教育男 = 研究生上男 + 本科学历男 + 大专学历男)%>%
+        mutate(高等教育女 = 研究生上女 + 本科学历女 + 大专学历女)%>%
+        mutate(平均薪酬 = 按地区及行业及规模分$薪酬 / 按地区及行业及规模分$总从业人数)%>%
+        mutate(平均员工营业收入 = 按地区及行业及规模分$营业收入合 / 按地区及行业及规模分$总从业人数) %>%
+        mutate(平均员工利润 = 按地区及行业及规模分$利润总额 / 按地区及行业及规模分$总从业人数) %>%
+        mutate(指标1 = (高等教育/平均薪酬)*100 )%>%
+        mutate(指标2 = (高等教育/平均员工营业收入)*100)
+
+
+
+head(按地区及行业及规模_比例)
+```
+
+---
+
+### Visualization
+
+#### Descriptive: 
+
+1. 哪一个企业员工的平均高等教育水平最高/最低？ 
+
+
+2. 哪一个企业员工的平均初等教育水平最高/最低？
+
+
+```{r,fig.height=5, fig.width= 10,cache=TRUE}
+
+按行业分就业分布 %>%
+        summarise(行业名称,员工高等教育水平 = (高等教育/总从业人数), 
+                      员工中等教育水平 = (中等教育/总从业人数), 员工初等教育水平 = (初等教育及以下/总从业人数),
+                      check = 员工高等教育水平+员工中等教育水平+员工初等教育水平) %>%
+        arrange(desc(员工高等教育水平))
+
+gg = 按行业分就业分布 %>%
+        mutate(行业名称 = reorder(行业名称,-(高等教育/总从业人数))) %>%
+        ggplot(aes(x = 行业名称,y = (高等教育/总从业人数),fill = 行业名称))+
+        geom_bar(stat = 'identity') + 
+        geom_bar(stat = 'identity',aes(y = 中等教育/总从业人数), alpha = 0.3)+
+         geom_bar(stat = 'identity',aes(y = 初等教育及以下/总从业人数), alpha = 0.7, width = 0.2)+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(
+                title = '按行业分各教育水平占比
+                ',
+                y  = '各水平教育从业人员占比 (%)'
+        )
+
+ggplotly(gg)
+```
+
+**电力、热力的生产和供应业** 拥有**最高**比例的高等教育员工，占总从业人数的 `30%`
+
+**皮革、毛皮、羽毛(绒)及其制品业** 拥有**最低**比例的高等教育员工，占总从业人数的 `5%`
+
+**其他采矿业** 拥有**最高**比例的初等教育员工，占总从业人数的 `80%`.
+
+**石油和天然气开采业** 拥有比例最低的初等教育员工，占总从业人数的 `20%`.
+
+---
+
+####  规模对高等教育的影响
+
+```{r,cache=TRUE,fig.height=5, fig.width= 10}
+aa = 按行业分就业分布_比例 %>%
+        ggplot(aes(y = 高等教育, fill = 规模, alpha = 0.3, group = 规模))+
+        geom_density()
+
+bb = 按行业分就业分布_比例 %>%
+        ggplot(aes(y = 高等教育, x = 规模, fill = 规模,alpha = 0.3))+
+        geom_boxplot()
+
+grid.arrange(aa, bb, ncol = 2, top = 'Scale Effect')
+
+ggplotly(bb)
+
+
+gm = 按行业分就业分布_比例 %>%
+        mutate(行业名称 = reorder(行业名称,-高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 高等教育,color = 规模,group = 规模))+
+        geom_line()+theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '不同规模行业高等教育水平占比', y = '高等教育水平占比')
+ggplotly(gm)
+
+```
+
+规模影响是存在的。整体上来看，大规模的企业有着更高的中位数，并且有着更高的right tail。
+
+因此，接下来的分析中，我么将采取分规模进行分析， 通过分析大规模，中规模，和小规模的企业，来确定education inflation是否存在。
+
+---
+
+
+#### 大规模企业：
+
+##### 3线分析: 
+
+```{r,fig.height=5, fig.width= 10}
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 高等教育*100,group =1,color = '高等教育水平'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y =平均薪酬 ,group =1, color = '平均薪酬'))+
+        geom_line(aes(x = 行业名称,y = 平均员工营业收入/50 ,group =1, color = '平均员工营业收入'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '高等教育水平、平均薪酬、平均员工收入', y = '高等教育水平占比')
+
+
+```
+
+##### 指标1分析: 
+
+\[
+  指标_{1} = \frac{高等教育占比}{平均薪酬}
+\]
+
+---
+
+Educational inflation: 文凭含金量在一个时间跨度上显示出减少的趋势
+
+由于缺少时间数据 只能在不同行业间比较文凭的含金量 
+
+为此 我们设定了一个参数 **Cross Industry Educational Inflation Indicator** 来进行不同行业间的文凭含金量对比
+
+这是文凭含金量的一个表示式，
+
+a%表示一个企业高等教育文凭持有者占比，
+
+w%表示一个企业内的平均薪酬加福利。
+
+理论上，如果a%越高，w%越小，则I越大，文凭含金量越小。
+
+在教育水平（企业高等教育文凭持有比例）按从低到高排序的情况下，我们绘制了比较相同规模不同行业间平均薪酬加福利以及I参数情况的两张图，并且对I从高到低排序，也绘制了一张图。
+
+---
+
+```{r,fig.height=5, fig.width= 10}
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 指标1,group =1,color = '指标1'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标1: 高等教育水平 / 平均薪酬（按教育水平排列） ', y = 'ratio')
+
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale')%>%
+        mutate(行业名称 = reorder(行业名称,-指标1))%>%
+        ggplot(aes(x = 行业名称,y = 指标1,group =1,color = '指标1'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标1: 高等教育水平 / 平均薪酬（按指标排列） ', y = 'ratio')
+        
+
+asd = 按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale') %>%
+        select(行业名称, 高等教育,平均薪酬,指标1)%>%
+        mutate(高等教育 = 高等教育 *100)%>%
+        arrange(desc(指标1))
+knitr::kable(asd)
+
+```
+
+---
+
+对指标I进行对比，我们可以对不同行业的文凭含金量作一个对比。
+
+前两张图进行分析可以发现不同行业间平均薪酬与教育水平对指标高低的影响。
+
+举例分析木材，煤炭的比较，木材与有色金属的比较。
+
+缺点：只能简单说明不同产业的文凭含金量的高低不同，并不能说明是什么因素影响了文凭含金量。
+
+各行业之间的工资标准，利润率，对高等教育人才的需求各不相同，
+
+还有其他的一些更复杂的因素导致不同行业文凭含金量不同。
+
+比如说烟草行业在中国属于国家垄断，且税收较高，所以在文凭含金量的比较中比较突出。
+
+---
+
+
+##### 指标2分析: 
+
+\[
+  指标_{2} = \frac{高等教育占比}{平均营业收入}
+\]
+
+
+```{r,fig.height=5, fig.width= 10}
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 指标2,group =1,color = '指标2'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标2: 高等教育水平 / 平均营业收入 ', y = 'ratio')
+
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale')%>%
+        mutate(行业名称 = reorder(行业名称,-指标2))%>%
+        ggplot(aes(x = 行业名称,y = 指标2,group =1,color = '指标2'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标2: 高等教育水平 / 平均营业收入 ', y = 'ratio')
+
+aaaa = 按行业分就业分布_比例 %>%
+        filter(规模 == 'Large Scale')%>%
+        select(行业名称, 高等教育,平均员工营业收入,指标2)%>%
+        mutate(高等教育 = 高等教育 *100)%>%
+        arrange(desc(指标2))
+knitr::kable(aaaa)
+```
+
+---
+
+#### 中规模企业
+
+
+##### 3线分析: 
+
+```{r,fig.height=5, fig.width= 10}
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale') %>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 高等教育*100,group =1,color = '高等教育水平'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y =平均薪酬 ,group =1, color = '平均薪酬'))+
+        geom_line(aes(x = 行业名称,y =平均员工营业收入/50 ,group =1, color = '平均员工营业收入'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '高等教育水平、平均薪酬、平均员工收入（中等规模）', y = '高等教育水平占比')
+
+
+```
+
+##### 指标1分析: 
+
+\[
+  指标_{1} = \frac{高等教育占比}{平均薪酬} = \frac{a\%}{w}
+\]
+
+
+
+```{r,fig.height=5, fig.width= 10}
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 指标1,group =1,color = '指标1'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标1: 高等教育水平 / 平均薪酬（按教育排列） ', y = 'ratio')
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale')%>%
+        mutate(行业名称 = reorder(行业名称,-指标1))%>%
+        ggplot(aes(x = 行业名称,y = 指标1,group =1,color = '指标1'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '中等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标1: 高等教育水平 / 平均薪酬 （按指标排列）', y = 'ratio')
+
+asd = 按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale') %>%
+        select(行业名称, 高等教育,平均薪酬,指标1)%>%
+        mutate(高等教育 = 高等教育 *100)%>%
+        arrange(desc(指标1))
+
+knitr::kable(asd)
+
+
+```
+
+
+##### 指标2分析: 
+
+\[
+  指标_{2} = \frac{高等教育占比}{平均营业收入}
+\]
+
+```{r,fig.height=5, fig.width= 10}
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 指标2,group =1,color = '指标2'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标2: 高等教育水平 / 平均营业收入（中等规模） ', y = 'ratio')
+
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale')%>%
+        mutate(行业名称 = reorder(行业名称,-指标2))%>%
+        ggplot(aes(x = 行业名称,y = 指标2,group =1,color = '指标2'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标2: 高等教育水平 / 平均营业收入 （中等规模）', y = 'ratio')
+
+aaaaaa = 按行业分就业分布_比例 %>%
+        filter(规模 == 'Median Scale')%>%
+        select(行业名称, 高等教育,平均员工营业收入,指标2)%>%
+        mutate(高等教育 = 高等教育 *100)%>%
+        arrange(desc(指标2))
+
+knitr::kable(aaaaaa)
+```
+
+---
+
+#### 小规模企业
+
+##### 3线分析: 
+
+```{r,fig.height=5, fig.width= 10}
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale') %>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 高等教育*100,group =1,color = '高等教育水平'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y =平均薪酬 ,group =1, color = '平均薪酬'))+
+        geom_line(aes(x = 行业名称,y =平均员工营业收入/50 ,group =1, color = '平均员工营业收入'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '高等教育、平均薪酬、平均员工收入（小规模）', y = '高等教育水平占比')
+
+
+```
+
+##### 指标1分析: 
+
+\[
+  指标_{1} = \frac{高等教育占比}{平均薪酬}
+\]
+
+```{r,fig.height=5, fig.width= 10}
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 指标1,group =1,color = '指标1'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标1: 高等教育水平 / 平均薪酬 ', y = 'ratio')
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale')%>%
+        mutate(行业名称 = reorder(行业名称,-指标1))%>%
+        ggplot(aes(x = 行业名称,y = 指标1,group =1,color = '指标1'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育*5 ,group =1, color = '高等教育'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标1: 高等教育水平 / 平均薪酬（小规模） ', y = 'ratio')
+        
+piu = 按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale') %>%
+        select(行业名称, 高等教育,平均薪酬,指标1)%>%
+        mutate(高等教育 = 高等教育 *100)%>%
+        arrange(desc(指标1))
+
+knitr::kable(piu)
+
+
+```
+
+##### 指标2分析: 
+
+\[
+  指标_{2} = \frac{高等教育占比}{平均营业收入}
+\]
+
+```{r,fig.height=5, fig.width= 10}
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale')%>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 行业名称,y = 指标2,group =1,color = '指标2'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育 ,group =1, color = '高等教育水平'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标2: 高等教育水平 / 平均营业收入（小规模） ', y = 'ratio')
+
+
+按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale')%>%
+        mutate(行业名称 = reorder(行业名称,-指标2))%>%
+        ggplot(aes(x = 行业名称,y = 指标2,group =1,color = '指标2'))+
+        geom_line()+
+        geom_line(aes(x = 行业名称,y = 高等教育 ,group =1, color = '高等教育'))+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 9))+
+        labs(title = '指标2: 高等教育水平 / 平均营业收入（小规模） ', y = 'ratio')
+
+sss = 按行业分就业分布_比例 %>%
+        filter(规模 == 'Small Scale')%>%
+        select(行业名称, 高等教育,平均员工营业收入,指标2)%>%
+        mutate(高等教育 = 高等教育 *100)%>%
+        arrange(desc(指标2))
+
+knitr::kable(sss)
+```
+
+---
+
+### 规模对指标1的影响
+
+```{r,fig.height=5, fig.width= 10}
+按行业分就业分布_比例 %>%
+        mutate(行业名称 = reorder(行业名称,高等教育))%>%
+        ggplot(aes(x = 规模,y = 指标1,color =行业名称, group = 行业名称))+
+        geom_point()+
+        geom_line()+
+        theme(text=element_text(family='STFangsong'))+
+        theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(hjust = 1,size = 9))+
+       labs(title = '规模对指标1的影响 ', y = 'ratio')
+## asas = 按行业分就业分布_比例 %>%
+##         mutate(行业名称 = reorder(行业名称,-高等教育))%>%
+##         ggplot(aes(x = 规模,y = 指标1,color =行业名称, group = 行业名称))+
+##         geom_point()+
+##         geom_line()+
+##         theme(text=element_text(family='STFangsong'))+
+##         theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(hjust = 1,size = 9))+
+##         labs(title = '规模对指标1的影响 ', y = 'ratio')
+## ggplotly(asas)
+```
+
+```{r}
+cp = 按行业分就业分布_比例[c('行业名称','行业大类','规模','指标1')]
+x = list('其他采矿业',11,'Large Scale', NA)
+cp = rbind(cp,x)
+
+
+ht = data.frame(行业名称 = unique(cp$行业名称), 行业代码 =unique(cp$行业大类) ,Small = NA, Median = NA, Large = NA)
+
+ht$Large[1:10] = cp[which(cp$规模 == 'Large Scale'),]$指标1[1:10]
+ht$Large[11] = NA
+ht$Large[12:39] = cp[which(cp$规模 == 'Large Scale'),]$指标1[11:38]
+ht$Median = cp[which(cp$规模 == 'Median Scale'),]$指标1
+ht$Small = cp[which(cp$规模 == 'Small Scale'),]$指标1
+
+for(i in 1:nrow(ht)){
+  if(ht$Median[i]>ht$Small[i]){
+    ht$StoM[i] = 'Increase'
+  }
+  else{
+     ht$StoM[i] = 'Decrease'
+  }
+}
+
+for(i in 1:10){
+  if(ht$Median[i]<ht$Large[i]){
+    ht$MtoL[i] = 'Increase'
+  }
+  else{
+     ht$MtoL[i] = 'Decrease'
+  }
+}
+
+for(i in 12:nrow(ht)){
+  if(ht$Median[i]<ht$Large[i]){
+    ht$MtoL[i] = 'Increase'
+  }
+  else{
+     ht$MtoL[i] = 'Decrease'
+  }
+}
+
+ht$MtoL[11] = NA
+table(ht$StoM, ht$MtoL)
+
+
+
+```
+
+```{r,fig.height=5, fig.width= 10}
+
+inference(y = 指标1, x = 规模, data = 按行业分就业分布_比例, type = 'ht', statistic = 'mean', method = 'theoretical')
+
+```
+
+############################################################################################################################################
+
+### Package Needed
+
+```{r cars}
+options(warn = -1)
+suppressMessages(library(ggplot2))
+suppressMessages(library(Hmisc))
+suppressMessages(library(dplyr))
+suppressMessages(library(readxl))
+suppressMessages(library(gridExtra))
+suppressMessages(library(plotly))
+library(statsr)
+options(warn = 0)
+```
+
+---
+
+### Data Inputing
+
+```{r,cache = TRUE}
+setwd("/Users/daiyichao/Desktop")
+## dat2008 = mdb.get('中国工业企业数据库2008.mdb')
+dat2008 = read.csv('中国工业企业数据库2008.csv', na.strings = c(c("","NULL"),'NA'))
+```
+
+```{r}
+names(dat2008)
+```
+
+---
+
+### Missing Value Calculated
+
+```{r}
+missing_value2008 = colSums(is.na(dat2008)) 
+missing_value2008 = data.frame(missing_value2008)
+rn = rownames(missing_value2008)
+missing_value2008 = cbind(rn, missing_value2008)
+missing_situation2008 = missing_value2008[order(missing_value2008$missing_value2008,decreasing = TRUE),]
+options(digits = 3)  ## Set the overview decimal places
+missing_situation2008 = missing_situation2008 %>% 
+        mutate(percentage = missing_value2008 / nrow(dat2008))
+knitr::kable(head(missing_situation2008,n = 71))
+```
+
+---
+
+### Select useful variables / Cleaning Data
+
+```{r}
+varNeeded2008 = dat2008[c('行业代码',
+                          "营业收入全年营业收入合计",
+                          "利润总额",
+                          "本年应付福利费总额.贷方累计发生额.",
+                          "本年应付工资总额.贷方累计发生额.",
+                          "全部从业人员年平均人数")]
+varNeeded2008 = varNeeded2008[-which(varNeeded2008["本年应付工资总额.贷方累计发生额."] == 0), ]
+
+indexmiss = which(is.na(varNeeded2008$本年应付工资总额.贷方累计发生额.))
+
+varNeeded2008 = varNeeded2008[-indexmiss, ]
+
+
+
+colnames(varNeeded2008) = c('行业代码', '全年营业收入合计','利润总额','本年应付福利费总额','本年应付工资总额', '全部从业人员')
+
+knitr::kable(colSums(is.na(varNeeded2008)))
+
+varNeeded2008$年份 = 2008
+
+行业大类代码 = character(0)  ### 行业大类代码
+
+for(i in 1:nrow(varNeeded2008)){
+        if(nchar(varNeeded2008$行业代码[i]) == 3){
+                行业大类代码[i] = substr(varNeeded2008$行业代码[i],1,1)
+        }
+        else{
+                行业大类代码[i] = substr(varNeeded2008$行业代码[i],1,2)
+        }
+}
+
+
+
+
+
+varNeeded2008$行业大类代码 = 行业大类代码      ### FIRM LEVEL TABLE
+
+varNeeded2008$行业大类代码 = as.numeric(varNeeded2008$行业大类代码)
+
+
+
+
+```
+
+### Left Join Tables
+
+```{r}
+行业类别名称FL = read_excel("国民经济行业分类与代码(GB-T-4754-2002).xlsx")
+行业类别名称 = read_excel("行业类别.xlsx")
+colnames(行业类别名称) = c('行业大类代码', '行业大类')
+
+
+
+
+colnames(行业类别名称FL)[1] = '行业代码'
+行业类别名称FL$行业代码 = as.numeric(行业类别名称FL$行业代码)
+
+
+varNeeded2008 = left_join(varNeeded2008,行业类别名称FL,by = "行业代码")
+varNeeded2008 = left_join(varNeeded2008,行业类别名称,by = "行业大类代码")
+varNeeded2008 = varNeeded2008[,-8]
+
+
+```
+
+```{r}
+str(varNeeded2008)
+varNeeded2008合计 = varNeeded2008 %>%
+        select(9,8,1,7,6:2) %>%
+        group_by(行业大类, `行业名称(FirmLevel)`,行业代码,年份) %>%
+        summarise_all(sum,na.rm = TRUE)
+varNeeded2008合计 = varNeeded2008合计 %>% 
+        mutate(平均工资 = 本年应付工资总额 / 全部从业人员)
+CPI2008 = 114.68
+varNeeded2008合计$真实平均工资 = varNeeded2008合计$平均工资 * CPI2008 / 100
+```
+
+### 真实平均工资计算公式
+
+
+\[
+  真实平均工资_{2004} = \frac{名义平均工资_{2004}}{CPI_{2004}} * 100
+\]
+
+
+\[
+  CPI_{2004} = 100
+\]
+
+
+\[
+  真实平均工资_{2008} = \frac{名义平均工资_{2008}}{CPI_{2008}} * 100
+\]
+
+
+\[
+  CPI_{2008} =  114.68
+\]
+
+
+### Average Salary Growth Rate From 2004 to 2008
+
+```{r}
+
+```
+
+
+
+
+############################################################################################################################################
+
+
+```{r}
+varNeeded2004 = dat1[c('行业类别',
+                     '全部从业人',
+                     "应付工资",
+                     "劳动保险费",
+                     "养老医疗保",
+                     "住房公积补",
+                     "营业收入合",
+                     "利润总额",
+                     '微机',
+                     '固定资产合',
+                     '所有者权益')]
+colnames(varNeeded2004)[1] = '行业代码'
+colSums(is.na(varNeeded2004))
+
+varNeeded2004$年份 = 2004
+
+行业大类代码 = character(0)  ### 行业大类代码
+
+for(i in 1:nrow(varNeeded2004)){
+        if(nchar(varNeeded2004$行业代码[i]) == 3){
+                行业大类代码[i] = substr(varNeeded2004$行业代码[i],1,1)
+        }
+        else{
+                行业大类代码[i] = substr(varNeeded2004$行业代码[i],1,2)
+        }
+}
+
+varNeeded2004$行业大类代码 = 行业大类代码      ### FIRM LEVEL TABLE
+
+varNeeded2004$行业大类代码 = as.numeric(varNeeded2004$行业大类代码)
+
+
+
+varNeeded2004$行业代码 = as.numeric(varNeeded2004$行业代码)
+
+学历职称2004 = dat1[,a:(b+12)]
+```
+
+```{r}
+行业类别名称FL = read_excel("国民经济行业分类与代码(GB-T-4754-2002).xlsx")
+行业类别名称 = read_excel("行业类别.xlsx")
+colnames(行业类别名称) = c('行业大类代码', '行业大类')
+
+
+indexFL = which(is.na(行业类别名称FL$行业代码))
+
+行业类别名称FL = 行业类别名称FL[-indexFL,]
+
+行业类别名称FL$行业代码 = as.numeric(行业类别名称FL$行业代码)
+
+
+varNeeded2004 = left_join(varNeeded2004,行业类别名称FL,by = "行业代码")
+varNeeded2004 = left_join(varNeeded2004,行业类别名称,by = "行业大类代码")
+
+varNeeded2004 = varNeeded2004[,-10]
+
+varNeeded2004 = cbind(varNeeded2004,学历职称2004)
+
+
+
+```
+
+```{r}
+varNeeded2004合计 = varNeeded2004 %>%
+        select(11,10,1,9,8:2,12:37) %>%
+        group_by(行业大类, `行业名称(FirmLevel)`,行业代码,年份) %>%
+        summarise_all(sum,na.rm = TRUE)
+
+#############################################################################################################
+
+varNeeded2004合计 = varNeeded2004合计 %>% 
+        mutate(平均工资 = 应付工资 / 全部从业人)  %>% 
+        mutate(初等教育及以下 = 初中以下男 + 初中学历女) %>%
+        mutate(中等教育 = 高中学历男 + 高中学历女) %>%
+        mutate(高等教育 = 研究生上男 + 本科学历男 + 大专学历男 + 研究生上女 + 本科学历女 + 大专学历女) %>%
+        mutate(承认技术人数 = 高技职称男 + 中技职称男 + 初技职称男 + 高技职称女 + 中技职称女+ 初技职称女)%>%
+        mutate(初等教育及以下男 = 初中以下男) %>%
+        mutate(初等教育及以下女 = 初中学历女)  %>%
+        mutate(中等教育男 =高中学历男 )%>%
+        mutate(中等教育女 = 高中学历女)%>%
+        mutate(高等教育男 = 研究生上男 + 本科学历男 + 大专学历男)%>%
+        mutate(高等教育女 = 研究生上女 + 本科学历女 + 大专学历女)%>%
+        mutate(高等教育水平 = 高等教育 / 全部从业人) %>%
+        mutate(技术水平 = 承认技术人数 / 全部从业人) %>%
+        mutate(AI水平_所有者权益 = 微机 / 所有者权益) %>%
+        mutate(AI水平_Employ = 微机 / 全部从业人)
+        
+  
+
+```
+
+初级是主管，中级是副主任，高级是副局长
+
+```{r}
+## dat1 加入firm level 数据
+which(colnames(dat1) == '行业类别')
+colnames(dat1)[22] = '行业代码'
+dat1$行业代码 = as.numeric(dat1$行业代码)
+dat1 = left_join(dat1,行业类别名称FL,by = "行业代码")
+
+CPI2004 = 100
+varNeeded2004合计$真实平均工资 = varNeeded2004合计$平均工资 * CPI2004 / 100
+
+
+
+
+
+```
+
+```{r}
+table(varNeeded2008合计$行业代码 %in% varNeeded2004合计$行业代码)
+```
+
+
+```{r}
+real_wage2008 = varNeeded2008合计[c('行业名称(FirmLevel)', '真实平均工资')]
+real_wage2004_base = varNeeded2004合计[(varNeeded2004合计$行业代码 %in% varNeeded2008合计$行业代码), 
+                                     c('行业名称(FirmLevel)', 
+                                       '真实平均工资','高等教育水平', '营业收入合', '技术水平','全部从业人',
+                                       'AI水平_所有者权益', 'AI水平_Employ')]   ####*****
+colnames(real_wage2004_base)[6] = '就业人数2004'
+
+c0408 = left_join(real_wage2008, real_wage2004_base, by = '行业名称(FirmLevel)')
+colnames(c0408)[c(2,3)] = c('真实平均工资2008','真实平均工资2004')
+c0408 = c0408 %>% 
+  mutate(Wage_Growth_Rate = (真实平均工资2008 - 真实平均工资2004) /真实平均工资2004 )
+
+c0408$`就业人数2008` = varNeeded2008合计$全部从业人员
+c0408$`Employment_Growth_Rate` = (c0408$就业人数2008 - c0408$就业人数2004) / c0408$就业人数2004
+
+
+```
+
+```{r}
+## 按照高等教育排列base
+
+c0408$scale高等教育水平 = rescale(c0408$高等教育水平,to = c(0,100))
+
+c0408[order(c0408$高等教育水平,decreasing = TRUE),]
+
+## wage
+c0408 %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+
+## employment
+c0408 %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+```
+
+
+```{r}
+## Remove the outlier (按照高等教育排列base)
+boxplot(c0408$高等教育水平)
+boxplot(c0408$高等教育水平)$out
+
+c0408ee = c0408
+Q <- quantile(c0408ee$高等教育水平, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0408ee$高等教育水平)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+c0408ee = subset(c0408ee, c0408ee$高等教育水平 > (Q[1] - 1.5*iqr) & c0408ee$高等教育水平 < (Q[2]+1.5*iqr))
+
+c0408ee$scale高等教育水平 = rescale(c0408ee$高等教育水平,to = c(0,100))
+
+c0408ee[order(c0408ee$高等教育水平,decreasing = TRUE),]
+
+## wage
+c0408ee %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+
+## employment
+c0408ee %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+
+
+
+```
+
+
+```{r}
+## 按照平均工资排列base
+
+
+
+c0408$scale_真实平均工资2004 = rescale(c0408$真实平均工资2004, to = c(0,100))
+
+c0408 %>%
+  arrange(desc(真实平均工资2004))
+##wage
+c0408 %>%
+  ggplot(aes(x = `scale_真实平均工资2004` ,y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape ='o')+
+  geom_smooth(se = FALSE, method = "gam")+    ## gam // loess
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04真实工资排序)', y = 'Growth Rate')
+
+## employment
+c0408 %>%
+  ggplot(aes(x = `scale_真实平均工资2004`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04真实工资排序)', y = 'Growth Rate')
+```
+
+
+```{r}
+## Remove the outlier (按照平均工资排列base)
+boxplot(c0408$真实平均工资2004)
+boxplot(c0408$真实平均工资2004)$out
+
+c0408ee = c0408
+Q <- quantile(c0408ee$真实平均工资2004, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0408ee$真实平均工资2004)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+c0408ee = subset(c0408ee, c0408ee$真实平均工资2004 > (Q[1] - 1.5*iqr) & c0408ee$真实平均工资2004 < (Q[2]+1.5*iqr))
+
+c0408ee$scale_真实平均工资2004 = rescale(c0408ee$真实平均工资2004,to = c(0,100))
+
+c0408ee[order(c0408ee$真实平均工资2004,decreasing = TRUE),]
+
+## wage
+c0408ee %>%
+  ggplot(aes(x = `scale_真实平均工资2004`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04真实平均工资2004排序)', y = 'Growth Rate')
+
+## employment
+c0408ee %>%
+  ggplot(aes(x = `scale_真实平均工资2004`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04真实平均工资排序)', y = 'Growth Rate')
+```
+
+
+
+
+```{r}
+## 营业额排序
+
+c0408$scale_营业收入合 = rescale(c0408$营业收入合, to = c(0,100))
+c0408 %>%
+  arrange(desc(营业收入合))
+  
+##Wage
+  
+c0408 %>%
+  ggplot(aes(x = `scale_营业收入合`,y = Wage_Growth_Rate)) +
+  geom_point(size = 1, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04营业额排序)', y = 'Growth Rate')
+
+## employment
+
+c0408 %>%
+  ggplot(aes(x = `scale_营业收入合`,y = Employment_Growth_Rate)) +
+  geom_point(size = 1, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04营业额排序)', y = 'Growth Rate')
+
+
+```
+
+
+```{r}
+
+## Remove the outlier (按照营业额排列base)
+boxplot(c0408$营业收入合)
+boxplot(c0408$营业收入合)$out
+
+c0408ee = c0408
+Q <- quantile(c0408ee$营业收入合, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0408ee$营业收入合)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+c0408ee = subset(c0408ee, c0408ee$营业收入合 > (Q[1] - 1.5*iqr) & c0408ee$营业收入合 < (Q[2]+1.5*iqr))
+
+c0408ee$scale_营业收入合 = rescale(c0408ee$营业收入合,to = c(0,100))
+
+c0408ee[order(c0408ee$营业收入合,decreasing = TRUE),]
+
+## wage
+c0408ee %>%
+  ggplot(aes(x = `scale_营业收入合`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04营业收入合排序)', y = 'Growth Rate')
+
+## employment
+c0408ee %>%
+  ggplot(aes(x = `scale_营业收入合`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04营业收入合排序)', y = 'Growth Rate')
+
+```
+
+
+
+职称制度是我国评价专业技术人才的基本制度。也就是说，你说这个专业技术人才好，好在哪里，有没有什么标准和依据，那么职称就可以说是一种标准和依据。
+
+高级技师就是高级技能工程师,属于职业资格,技师是各行业的高级技术人员中设置的技术职务。
+
+按照国家职业标准，职业资格等级共分为五级为初级，四级为中级、助理为三级、技师为二级、高级技师为一级。
+
+```{r}
+c0408$scale_技术水平 = rescale(c0408$技术水平, to = c(0,100))
+c0408 %>%
+  arrange(desc(技术水平))
+  
+
+## Wage
+c0408 %>%
+  ggplot(aes(x = `scale_技术水平`,y = Wage_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04技术水平)', y = 'Growth Rate')
+
+## Emplymennt
+c0408 %>%
+  ggplot(aes(x = `scale_技术水平`,y = Employment_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04技术水平)', y = 'Growth Rate')
+
+```
+
+```{r}
+## Remove the outlier (按照技术水平排列base)
+boxplot(c0408$技术水平)
+boxplot(c0408$技术水平)$out
+
+c0408ee = c0408
+Q <- quantile(c0408ee$技术水平, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0408ee$技术水平)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+c0408ee = subset(c0408ee, c0408ee$技术水平 > (Q[1] - 1.5*iqr) & c0408ee$技术水平 < (Q[2]+1.5*iqr))
+
+c0408ee$scale_技术水平 = rescale(c0408ee$技术水平,to = c(0,100))
+
+c0408ee[order(c0408ee$技术水平,decreasing = TRUE),]
+
+## wage
+c0408ee %>%
+  ggplot(aes(x = `scale_技术水平`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04技术水平排序)', y = 'Growth Rate')
+
+## employment
+c0408ee %>%
+  ggplot(aes(x = `scale_技术水平`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04技术水平排序)', y = 'Growth Rate')
+```
+
+
+
+####################################################################################################################################################
+
+
+
+####################################################################################################################################################
+
+
+```{r,cache=TRUE}
+dat2013 = read.csv('2013数据库.csv', na.strings = c('','NA'))
+```
+
+
+```{r}
+names(dat2013)
+```
+
+---
+
+### Missing Value Calculated
+
+```{r}
+missing_value2013 = colSums(is.na(dat2013)) 
+missing_value2013 = data.frame(missing_value2013)
+rn = rownames(missing_value2013)
+missing_value2013 = cbind(rn, missing_value2013)
+missing_situation2013 = missing_value2013[order(missing_value2013$missing_value2013,decreasing = TRUE),]
+options(digits = 3)  ## Set the overview decimal places
+missing_situation2013 = missing_situation2013 %>% 
+        mutate(percentage = missing_value2013 / nrow(dat2013))
+knitr::kable(head(missing_situation2013,n = 59))
+```
+
+---
+
+### Select useful variables / Cleaning Data
+
+```{r}
+varNeeded2013 = dat2013[c('行业代码',
+                          "营业收入",
+                          "利润总额",
+                          "应付职工薪酬",
+                          "X.从业人数")]
+varNeeded2013 = varNeeded2013[-which(varNeeded2013["应付职工薪酬"] == 0), ]
+colnames(varNeeded2013)[5] = '从业人数'
+
+varNeeded2013 = varNeeded2013[-is.na(varNeeded2013$应付职工薪酬), ]
+
+colSums(is.na(varNeeded2013))
+
+
+
+
+colnames(varNeeded2013) = c('行业代码', '全年营业收入合计','利润总额','本年应付工资总额', '全部从业人员')
+
+knitr::kable(colSums(is.na(varNeeded2013)))
+
+varNeeded2013$年份 = 2013
+
+行业大类代码 = character(0)  ### 行业大类代码
+
+for(i in 1:nrow(varNeeded2013)){
+        if(nchar(varNeeded2013$行业代码[i]) == 3){
+                行业大类代码[i] = substr(varNeeded2013$行业代码[i],1,1)
+        }
+        else{
+                行业大类代码[i] = substr(varNeeded2013$行业代码[i],1,2)
+        }
+}
+
+
+
+
+
+varNeeded2013$行业大类代码 = 行业大类代码      ### FIRM LEVEL TABLE
+
+varNeeded2013$行业大类代码 = as.numeric(varNeeded2013$行业大类代码)
+
+
+```
+
+### Left Join Tables
+
+```{r}
+
+
+
+varNeeded2013 = left_join(varNeeded2013,行业类别名称FL,by = "行业代码")
+varNeeded2013 = left_join(varNeeded2013,行业类别名称,by = "行业大类代码")
+
+
+
+knitr::kable(colSums(is.na(varNeeded2013)))
+
+knitr::kable(table(varNeeded2013[is.na(varNeeded2013$`行业名称(FirmLevel)`),'行业代码']))
+
+
+index = which(is.na(varNeeded2013$行业大类))
+varNeeded2013 = varNeeded2013[-index,]
+index = which(is.na(varNeeded2013$`行业名称(FirmLevel)`))
+varNeeded2013 = varNeeded2013[-index,]
+varNeeded2013 = varNeeded2013[,-7]
+
+
+
+```
+
+```{r}
+
+varNeeded2013合计 = varNeeded2013 %>%
+        select(8,7,1,6,5:2) %>%
+        group_by(行业大类, `行业名称(FirmLevel)`,行业代码,年份) %>%
+        summarise_all(sum,na.rm = TRUE)
+
+varNeeded2013合计 = varNeeded2013合计 %>% 
+        mutate(平均工资 = 本年应付工资总额 / 全部从业人员)
+
+CPI2013 = 130.51
+varNeeded2013合计$真实平均工资 = varNeeded2013合计$平均工资 * CPI2013 / 100
+
+```
+
+### Left_join
+
+```{r}
+real_wage2013 = varNeeded2013合计[c('行业名称(FirmLevel)', '真实平均工资')]
+
+c0413 = left_join(real_wage2013, real_wage2004_base, by = '行业名称(FirmLevel)')
+
+colnames(c0413)[c(2,3)] = c('真实平均工资2013','真实平均工资2004')
+
+c0413 = c0413 %>% 
+  mutate(Wage_Growth_Rate = (真实平均工资2013 - 真实平均工资2004) /真实平均工资2004 )
+
+
+c0413$`就业人数2013` = varNeeded2013合计$全部从业人员
+
+c0413$`Employment_Growth_Rate` = (c0413$就业人数2013 - c0413$就业人数2004) / c0413$就业人数2004
+
+
+
+index = which(is.na(c0413$真实平均工资2004))
+
+c0413 = c0413[-index,]
+
+colSums(is.na(c0413))
+
+
+
+```
+
+```{r}
+## 按照高等教育排列base
+
+c0413[order(c0413$高等教育水平,decreasing = TRUE),]
+
+c0413$scale高等教育水平 = rescale(c0413$高等教育水平,to = c(0,100))
+
+## wage
+c0413 %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o') +
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+
+
+## employment
+c0413 %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+
+```
+
+```{r}
+## Remove the outlier (按照高等教育排列base)
+boxplot(c0413$高等教育水平)
+boxplot(c0413$高等教育水平)$out
+
+c0413ee = c0413
+Q <- quantile(c0413ee$高等教育水平, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$高等教育水平)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Wage_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Wage_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$高等教育水平 > (Q[1] - 1.5*iqr) & c0413ee$高等教育水平 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Wage_Growth_Rate` > low1 & c0413ee$`Wage_Growth_Rate` < up1))
+
+c0413ee$scale高等教育水平 = rescale(c0413ee$高等教育水平,to = c(0,100))
+
+c0413ee[order(c0413ee$高等教育水平,decreasing = TRUE),]
+
+## wage
+
+c0413ee %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+
+
+c0413ee = c0413
+Q <- quantile(c0413ee$高等教育水平, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$高等教育水平)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Employment_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Employment_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$高等教育水平 > (Q[1] - 1.5*iqr) & c0413ee$高等教育水平 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Employment_Growth_Rate` > low1 & c0413ee$`Employment_Growth_Rate` < up1) )
+
+c0413ee$scale高等教育水平 = rescale(c0413ee$高等教育水平,to = c(0,100))
+
+
+## employment
+c0413ee %>%
+  ggplot(aes(x = `scale高等教育水平`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04高等教育水平排序)', y = 'Growth Rate')
+```
+
+
+
+```{r}
+## 按照平均工资排列base
+
+
+
+c0413$scale_真实平均工资2004 = rescale(c0413$真实平均工资2004, to = c(0,100))
+
+c0413 %>%
+  arrange(desc(真实平均工资2004))
+##wage
+c0413 %>%
+  ggplot(aes(x = `scale_真实平均工资2004` ,y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape ='o')+
+  geom_smooth(se = FALSE, method = "gam")+    ## gam // loess
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04真实工资排序)', y = 'Growth Rate')
+
+## employment
+c0413 %>%
+  ggplot(aes(x = `scale_真实平均工资2004`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04真实工资排序)', y = 'Growth Rate')
+
+```
+
+```{r}
+## Remove the outlier (按照平均工资排列base)
+boxplot(c0413$真实平均工资2004)
+boxplot(c0413$真实平均工资2004)$out
+
+c0413ee = c0413
+Q <- quantile(c0413ee$真实平均工资2004, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$真实平均工资2004)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Wage_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Wage_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$真实平均工资2004 > (Q[1] - 1.5*iqr) & c0413ee$真实平均工资2004 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Wage_Growth_Rate` > low1 & c0413ee$`Wage_Growth_Rate` < up1))
+
+
+c0413ee$scale_真实平均工资2004 = rescale(c0413ee$真实平均工资2004,to = c(0,100))
+
+c0413ee[order(c0413ee$真实平均工资2004,decreasing = TRUE),]
+
+## wage
+c0413ee %>%
+  ggplot(aes(x = `scale_真实平均工资2004`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04真实平均工资2004排序)', y = 'Growth Rate')
+
+c0413ee = c0413
+Q <- quantile(c0413ee$真实平均工资2004, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$真实平均工资2004)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Employment_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Employment_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$真实平均工资2004 > (Q[1] - 1.5*iqr) & c0413ee$真实平均工资2004 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Employment_Growth_Rate` > low1 & c0413ee$`Employment_Growth_Rate` < up1) )
+
+c0413ee$scale_真实平均工资2004 = rescale(c0413ee$真实平均工资2004,to = c(0,100))
+
+## employment
+c0413ee %>%
+  ggplot(aes(x = `scale_真实平均工资2004`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04真实平均工资排序)', y = 'Growth Rate')
+```
+
+
+```{r}
+## 营业额排序
+
+c0413$scale_营业收入合 = rescale(c0413$营业收入合, to = c(0,100))
+c0413 %>%
+  arrange(desc(营业收入合))
+  
+##Wage
+  
+c0413 %>%
+  ggplot(aes(x = `scale_营业收入合`,y = Wage_Growth_Rate)) +
+  geom_point(size = 1, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04营业额排序)', y = 'Growth Rate')
+
+## employment
+
+c0413 %>%
+  ggplot(aes(x = `scale_营业收入合`,y = Employment_Growth_Rate)) +
+  geom_point(size = 1, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04营业额排序)', y = 'Growth Rate')
+```
+
+```{r}
+## Remove the outlier (按照营业额排列base)
+boxplot(c0413$营业收入合)
+boxplot(c0413$营业收入合)$out
+
+c0413ee = c0413
+Q <- quantile(c0413ee$营业收入合, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$营业收入合)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Wage_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Wage_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$营业收入合 > (Q[1] - 1.5*iqr) & c0413ee$营业收入合 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Wage_Growth_Rate` > low1 & c0413ee$`Wage_Growth_Rate` < up1))
+
+c0413ee$scale_营业收入合 = rescale(c0413ee$营业收入合,to = c(0,100))
+
+c0413ee[order(c0413ee$营业收入合,decreasing = TRUE),]
+
+## wage
+c0413ee %>%
+  ggplot(aes(x = `scale_营业收入合`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04营业收入合排序)', y = 'Growth Rate')
+
+c0413ee = c0413
+Q <- quantile(c0413ee$营业收入合, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$营业收入合)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Employment_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Employment_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$营业收入合 > (Q[1] - 1.5*iqr) & c0413ee$营业收入合 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Employment_Growth_Rate` > low1 & c0413ee$`Employment_Growth_Rate` < up1) )
+
+c0413ee$scale_营业收入合 = rescale(c0413ee$营业收入合,to = c(0,100))
+
+## employment
+c0413ee %>%
+  ggplot(aes(x = `scale_营业收入合`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04营业收入合排序)', y = 'Growth Rate')
+```
+
+
+```{r}
+## 技术
+c0413$scale_技术水平 = rescale(c0413$技术水平, to = c(0,100))
+c0413 %>%
+  arrange(desc(技术水平))
+  
+
+## Wage
+c0413 %>%
+  ggplot(aes(x = `scale_技术水平`,y = Wage_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04技术水平)', y = 'Growth Rate')
+
+## Emplymennt
+c0413 %>%
+  ggplot(aes(x = `scale_技术水平`,y = Employment_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04技术水平)', y = 'Growth Rate')
+```
+
+```{r}
+## Remove the outlier (按照技术水平排列base)
+boxplot(c0413$技术水平)
+boxplot(c0413$技术水平)$out
+
+c0413ee = c0413
+Q <- quantile(c0413ee$技术水平, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$技术水平)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Wage_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Wage_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$技术水平 > (Q[1] - 1.5*iqr) & c0413ee$技术水平 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Wage_Growth_Rate` > low1 & c0413ee$`Wage_Growth_Rate` < up1))
+
+c0413ee$scale_技术水平 = rescale(c0413ee$技术水平,to = c(0,100))
+
+c0413ee[order(c0413ee$技术水平,decreasing = TRUE),]
+
+## wage
+c0413ee %>%
+  ggplot(aes(x = `scale_技术水平`, y = log(Wage_Growth_Rate))) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04技术水平排序)', y = 'Growth Rate')
+
+c0413ee = c0413
+Q <- quantile(c0413ee$技术水平, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$技术水平)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Employment_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Employment_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$技术水平 > (Q[1] - 1.5*iqr) & c0413ee$技术水平 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Employment_Growth_Rate` > low1 & c0413ee$`Employment_Growth_Rate` < up1) )
+
+c0413ee$scale_技术水平 = rescale(c0413ee$技术水平,to = c(0,100))
+
+## employments
+c0413ee %>%
+  ggplot(aes(x = `scale_技术水平`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04技术水平排序)', y = 'Growth Rate')
+```
+
+
+```{r}
+## AI_所有者权益 排序
+c0413$scale_AI水平_所有者权益 = rescale(c0413$AI水平_所有者权益, to = c(0,100))
+c0413 %>%
+  arrange(desc(AI水平_所有者权益))
+  
+
+## Wage
+c0413 %>%
+  ggplot(aes(x = `scale_AI水平_所有者权益`,y = Wage_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04AI水平_所有者权益)', y = 'Growth Rate')
+
+## Emplymennt
+c0413 %>%
+  ggplot(aes(x = `scale_AI水平_所有者权益`,y = Employment_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04AI水平_所有者权益)', y = 'Growth Rate')
+```
+
+
+```{r}
+## AI_所有者权益 排序
+boxplot(c0413$AI水平_所有者权益)
+boxplot(c0413$AI水平_所有者权益)$out
+
+c0413ee = c0413
+Q <- quantile(c0413ee$AI水平_所有者权益, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$AI水平_所有者权益)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Wage_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Wage_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$AI水平_所有者权益 > (Q[1] - 1.5*iqr) & c0413ee$AI水平_所有者权益 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Wage_Growth_Rate` > low1 & c0413ee$`Wage_Growth_Rate` < up1))
+
+
+c0413ee$scale_AI水平_所有者权益 = rescale(c0413ee$AI水平_所有者权益,to = c(0,100))
+
+c0413ee[order(c0413ee$AI水平_所有者权益,decreasing = TRUE),]
+
+## wage
+c0413ee %>%
+  ggplot(aes(x = `scale_AI水平_所有者权益`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04AI水平_所有者权益排序)', y = 'Growth Rate')
+
+c0413ee = c0413
+Q <- quantile(c0413ee$AI水平_所有者权益, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$AI水平_所有者权益)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Employment_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Employment_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$AI水平_所有者权益 > (Q[1] - 1.5*iqr) & c0413ee$AI水平_所有者权益 < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Employment_Growth_Rate` > low1 & c0413ee$`Employment_Growth_Rate` < up1) )
+
+c0413ee$scale_AI水平_所有者权益 = rescale(c0413ee$AI水平_所有者权益,to = c(0,100))
+
+
+
+## employments
+c0413ee %>%
+  ggplot(aes(x = `scale_AI水平_所有者权益`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04AI水平_所有者权益排序)', y = 'Growth Rate')
+```
+
+
+
+
+
+```{r}
+## AAI水平_Employ 排序
+c0413$scale_AI水平_Employ = rescale(c0413$AI水平_Employ, to = c(0,100))
+c0413 %>%
+  arrange(desc(AI水平_Employ))
+  
+
+## Wage
+c0413 %>%
+  ggplot(aes(x = `scale_AI水平_Employ`,y = Wage_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04AI水平_Employ)', y = 'Growth Rate')
+
+## Emplymennt
+c0413 %>%
+  ggplot(aes(x = `scale_AI水平_Employ`,y = Employment_Growth_Rate)) +
+  geom_point(size = 3, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## 'gam'
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04AI水平_Employ)', y = 'Growth Rate')
+```
+
+
+```{r}
+## AI水平_Employ 排序
+boxplot(c0413$AI水平_Employ)
+boxplot(c0413$AI水平_Employ)$out
+
+c0413ee = c0413
+Q <- quantile(c0413ee$AI水平_Employ, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$AI水平_Employ)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Wage_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Wage_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$AI水平_Employ > (Q[1] - 1.5*iqr) & c0413ee$AI水平_Employ < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Wage_Growth_Rate` > low1 & c0413ee$`Wage_Growth_Rate` < up1))
+
+
+c0413ee$scale_AI水平_Employ = rescale(c0413ee$AI水平_Employ,to = c(0,100))
+
+c0413ee[order(c0413ee$AI水平_Employ,decreasing = TRUE),]
+
+## wage
+c0413ee %>%
+  ggplot(aes(x = `scale_AI水平_Employ`, y = Wage_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Wage Growth Rate(04AI水平_Employ排序)', y = 'Growth Rate')
+
+c0413ee = c0413
+Q <- quantile(c0413ee$AI水平_Employ, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(c0413ee$AI水平_Employ)
+up <-  Q[2]+1.5*iqr
+low<- Q[1]-1.5*iqr 
+
+Q1 <- quantile(c0413$`Employment_Growth_Rate`, probs=c(.25, .75), na.rm = FALSE)
+iqr1 <- IQR(c0413$`Employment_Growth_Rate`)
+up1 <-  Q1[2]+1.5*iqr1
+low1<- Q1[1]-1.5*iqr1 
+
+
+c0413ee = subset(c0413ee, (c0413ee$AI水平_Employ > (Q[1] - 1.5*iqr) & c0413ee$AI水平_Employ < (Q[2]+1.5*iqr)) &
+                  (c0413ee$`Employment_Growth_Rate` > low1 & c0413ee$`Employment_Growth_Rate` < up1) )
+
+c0413ee$scale_AI水平_Employ = rescale(c0413ee$AI水平_Employ,to = c(0,100))
+
+
+## employments
+c0413ee %>%
+  ggplot(aes(x = `scale_AI水平_Employ`, y = Employment_Growth_Rate)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))+
+  labs(title = 'Employment Growth Rate(04AI水平_Employ排序)', y = 'Growth Rate')
+```
+####################################################################################################################################
+
+###################################################################################################################################
+
+## 劳动统计年鉴2004数据 
+
+```{r}
+library(readstata13)
+datLComp = read.dta13("2004baseyear 删过两个产业.dta")
+```
+
+```{r}
+
+datLComp %>%
+  ggplot(aes(x = indid, y = wageG2014)) +
+  geom_point(size = 2, shape = 'o')+
+  geom_smooth(se = FALSE, method = "loess")+ ## gam
+  theme(text=element_text(family='STFangsong'))+
+  theme(plot.title = element_text(hjust = 0.5, size = 15), axis.text.x = element_text(angle = 90, hjust = 1,size = 2))
+
+```
+
+```{r}
+c0413 = c0413[grep('制造|制品', c0413$`行业名称(FirmLevel)`), ]
+c0413 = c0413[-grep('加工', c0413$`行业名称(FirmLevel)`), ]
+
+```
+
+#### 高等教育：
+
+```{r}
+head04高等教育 = c0413 %>%
+  arrange(desc(高等教育水平)) %>%
+  select(`行业名称(FirmLevel)`)
+```
+
+
+#### 04工资水平：
+```{r}
+head04工资水平 = c0413 %>%
+  arrange(desc(`真实平均工资2004`)) %>%
+  select(`行业名称(FirmLevel)`)
+```
+
+#### 04营业额：
+```{r}
+head04营业额 = c0413 %>%
+  arrange(desc(营业收入合)) %>%
+  select(`行业名称(FirmLevel)`)
+```
+
+
+#### 04技术水平：
+```{r}
+head04技术水平 = c0413 %>%
+  arrange(desc(技术水平)) %>%
+  select(`行业名称(FirmLevel)`)
+```
+
+
+#### 04AI-所有者权益：
+```{r}
+head04AI水平_所有者权益 = c0413 %>%
+  arrange(desc(AI水平_所有者权益)) %>%
+  select(`行业名称(FirmLevel)`)
+```
+
+#### 04AI_Employ：
+```{r}
+head04AI水平_Employ = c0413 %>%
+  arrange(desc(AI水平_Employ)) %>%
+  select(`行业名称(FirmLevel)`)
+```
+
+
+
+```{r}
+head_scale = cbind(head04高等教育, head04工资水平, head04营业额, head04技术水平, head04AI水平_所有者权益, 
+                   head04AI水平_Employ)
+
+colnames(head_scale)[1:6] = c('04高等教育','04工资水平','04营业额','04技术水平','04AI水平_所有者权益',
+                              'AI水平_Employ')
+```
+
+
+```{r}
+knitr::kable(head_scale)
+write.csv(head_scale, '纯制造业4位数不分规模.csv')
+```
+
+

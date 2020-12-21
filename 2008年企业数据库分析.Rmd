@@ -1,0 +1,167 @@
+---
+title: 'R: 2008年企业数据库分析'
+author: "Dai Yichao (IVAN)"
+date: "9/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Package Needed
+
+```{r cars}
+options(warn = -1)
+suppressMessages(library(ggplot2))
+suppressMessages(library(Hmisc))
+suppressMessages(library(dplyr))
+suppressMessages(library(readxl))
+suppressMessages(library(gridExtra))
+suppressMessages(library(plotly))
+library(statsr)
+options(warn = 0)
+```
+
+---
+
+### Data Inputing
+
+```{r,cache = TRUE}
+setwd("/Users/daiyichao/Desktop")
+## dat2008 = mdb.get('中国工业企业数据库2008.mdb')
+dat2008 = read.csv('中国工业企业数据库2008.csv', na.strings = c(c("","NULL"),'NA'))
+```
+
+```{r}
+names(dat2008)
+```
+
+---
+
+### Missing Value Calculated
+
+```{r}
+missing_value2008 = colSums(is.na(dat2008)) 
+missing_value2008 = data.frame(missing_value2008)
+rn = rownames(missing_value2008)
+missing_value2008 = cbind(rn, missing_value2008)
+missing_situation2008 = missing_value2008[order(missing_value2008$missing_value2008,decreasing = TRUE),]
+options(digits = 3)  ## Set the overview decimal places
+missing_situation2008 = missing_situation2008 %>% 
+        mutate(percentage = missing_value2008 / nrow(dat2008))
+knitr::kable(head(missing_situation2008,n = 71))
+```
+
+---
+
+### Select useful variables / Cleaning Data
+
+```{r}
+varNeeded2008 = dat2008[c('行业代码',
+                          "营业收入全年营业收入合计",
+                          "利润总额",
+                          "本年应付福利费总额.贷方累计发生额.",
+                          "本年应付工资总额.贷方累计发生额.",
+                          "全部从业人员年平均人数")]
+varNeeded2008 = varNeeded2008[-which(varNeeded2008["本年应付工资总额.贷方累计发生额."] == 0), ]
+
+indexmiss = which(is.na(varNeeded2008$本年应付工资总额.贷方累计发生额.))
+
+varNeeded2008 = varNeeded2008[-indexmiss, ]
+
+
+
+colnames(varNeeded2008) = c('行业代码', '全年营业收入合计','利润总额','本年应付福利费总额','本年应付工资总额', '全部从业人员')
+
+knitr::kable(colSums(is.na(varNeeded2008)))
+
+varNeeded2008$年份 = 2008
+
+行业大类代码 = character(0)  ### 行业大类代码
+
+for(i in 1:nrow(varNeeded2008)){
+        if(nchar(varNeeded2008$行业代码[i]) == 3){
+                行业大类代码[i] = substr(varNeeded2008$行业代码[i],1,1)
+        }
+        else{
+                行业大类代码[i] = substr(varNeeded2008$行业代码[i],1,2)
+        }
+}
+
+
+
+
+
+varNeeded2008$行业大类代码 = 行业大类代码      ### FIRM LEVEL TABLE
+
+varNeeded2008$行业大类代码 = as.numeric(varNeeded2008$行业大类代码)
+
+
+
+
+```
+
+### Left Join Tables
+
+```{r}
+行业类别名称FL = read_excel("国民经济行业分类与代码(GB-T-4754-2002) 1.xls")
+行业类别名称 = read_excel("行业类别.xlsx")
+colnames(行业类别名称) = c('行业大类代码', '行业大类')
+
+
+indexFL = which(is.na(行业类别名称FL$F))
+行业类别名称FL = 行业类别名称FL[-indexFL,]
+行业类别名称FL = 行业类别名称FL[-1,]
+colnames(行业类别名称FL)[1] = '行业代码'
+行业类别名称FL$行业代码 = as.numeric(行业类别名称FL$行业代码)
+
+
+varNeeded2008 = left_join(varNeeded2008,行业类别名称FL,by = "行业代码")
+varNeeded2008 = left_join(varNeeded2008,行业类别名称,by = "行业大类代码")
+varNeeded2008 = varNeeded2008[,-8]
+
+
+```
+
+```{r}
+str(varNeeded2008)
+varNeeded2008合计 = varNeeded2008 %>%
+        select(9,8,1,7,6:2) %>%
+        group_by(行业大类, `行业名称(FirmLevel)`,行业代码,年份) %>%
+        summarise_all(sum,na.rm = TRUE)
+varNeeded2008合计 = varNeeded2008合计 %>% 
+        mutate(平均工资 = 本年应付工资总额 / 全部从业人员)
+CPI2008 = 114.68
+varNeeded2008合计$真实平均工资 = varNeeded2008合计$平均工资 * CPI2008 / 100
+```
+
+### 真实平均工资计算公式
+
+
+\[
+  真实平均工资_{2004} = \frac{名义平均工资_{2004}}{CPI_{2004}} * 100
+\]
+
+
+\[
+  CPI_{2004} = 100
+\]
+
+
+\[
+  真实平均工资_{2008} = \frac{名义平均工资_{2008}}{CPI_{2008}} * 100
+\]
+
+
+\[
+  CPI_{2008} = 101.80
+\]
+
+
+### Average Salary Growth Rate From 2004 to 2008
+
+```{r}
+
+```
+
